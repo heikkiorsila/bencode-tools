@@ -968,6 +968,15 @@ static void cmptest(const struct bencode *a, struct bencode *b, int expect)
 			ret, expect);
 		abort();
 	}
+	if (ret) {
+		/* Verify that comparison always gives the same order */
+		ret = ben_cmp(b, a);
+		if (ret != -expect) {
+			fprintf(stderr, "cmp returned %d, should have returned %d\n",
+				ret, -expect);
+			abort();
+		}
+	}
 	ben_free(b);
 }
 
