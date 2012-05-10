@@ -11,6 +11,17 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Used to verify format strings in compile time */
+#ifdef __GNUC__
+#define BEN_CHECK_FORMAT(args...)  __attribute__ ((format( args )))
+#else
+#define BEN_CHECK_FORMAT(args...)
+#endif
+
 enum {
 	BENCODE_BOOL = 1,
 	BENCODE_DICT,
@@ -25,6 +36,7 @@ enum {
 	BEN_INVALID,      /* Invalid data was given to decoder */
 	BEN_INSUFFICIENT, /* Insufficient amount of data for decoding */
 	BEN_NO_MEMORY,    /* Memory allocation failed */
+	BEN_MISMATCH,     /* A given structure did not match unpack format */
 };
 
 struct bencode {
@@ -315,6 +327,82 @@ struct bencode *ben_str(const char *s);
 
 /* Return a human readable explanation of error returned with ben_decode2() */
 const char *ben_strerror(int error);
+
+/*
+ * Unpack a Bencoded structure similar to scanf(). Takes a format string and
+ * a list of pointers as variable arguments. The given b structure is checked
+ * against the format and values are unpacked using the given specifiers.
+ * A specifier begins with a percent (%) that follows a string of specifier
+ * characters documented below.
+ * The syntax is similar to Python format for recursive data structures, and
+ * consists of tokens {, }, [, ] with any number of spaces between them.
+ * The keys of a dictionary are given as literal strings or integers and
+ * matched against the keys of the Bencoded structure.
+ *
+ * Unpack modifiers:
+ *     l    The integer is of type long or unsigned long, and the type of the
+ *          argument is expected to be long * or unsigned long *.
+ *     ll   The integer is a long long or an unsigned long long, and the
+ *          argument is long long * or unsigned long long *.
+ *     L    Same as ll.
+ *     q    Same as ll.
+ *
+ * Unpack specifiers:
+ *     %ps  The Bencode value must be a string and a pointer to a string
+ *          (char **) is expected to be given as arguments. Note, returns a
+ *          reference to the internal string buffer. The returned memory should
+ *          not be freed and it has the same life time as the Bencode string.
+ *
+ *     %pb  Takes any structure and writes a pointer given as an argument.
+ *          The argument is expected to be "struct bencode **". Note, returns a
+ *          reference to the value inside the structure passed to ben_unpack().
+ *          The returned memory should not be freed and it has the same life
+ *          time as the original structure.
+ *
+ *     %d   The bencode value is expected to be a (signed) integer. The
+ *          preceeding conversion modifiers define the type of the given
+ *          pointer.
+
+ *     %u   The bencode value is expected to be an unsigned integer. The
+ *          preceeding conversion modifiers define the type of the given
+ *          pointer.
+ */
+int ben_unpack(const struct bencode *b, const char *fmt, ...)
+	BEN_CHECK_FORMAT(scanf, 2, 3);
+
+int ben_unpack2(const struct bencode *b, size_t *off, struct bencode_error *error, const char *fmt, ...)
+	BEN_CHECK_FORMAT(scanf, 4, 5);
+
+/*
+ * Pack a Bencoded structure similar to printf(). Takes a format string and
+ * a list of values as variable arguments.
+ * Works similarly to ben_decode_printed(), but allows the string to values
+ * specifiers which are replaced with values given as arguments.
+ * A specifier begins with a percent (%) that follows a string of specifier
+ * characters documented below.
+ *
+ * Value modifiers:
+ *     l    The integer is of type long or unsigned long.
+ *     ll   The integer is a long long or an unsigned long long.
+ *     L    Same as ll.
+ *     q    Same as ll.
+ *
+ * Value specifiers:
+ *     %s   A string pointer (char *) expected to be given as argument. A new
+ *          Bencode string is constructed from the given string.
+ *
+ *     %pb  A Bencode structure (struct bencode *) is expected to be given as
+ *          argument. Note, takes ownership of the structure, even when an
+ *          error is returned.
+ *
+ *     %d   Constructs a new integer from the given (signed) integer. The
+ *          preceeding conversion modifiers define the type of the value.
+ *
+ *     %u   Constructs a new integer from the given unsigned integer. The
+ *          preceeding conversion modifiers define the type of the value.
+ */
+struct bencode *ben_pack(const char *fmt, ...)
+	BEN_CHECK_FORMAT(printf, 1, 2);
 
 /* ben_is_bool() returns 1 iff b is a boolean, 0 otherwise */
 static inline int ben_is_bool(const struct bencode *b)
@@ -615,5 +703,9 @@ int ben_put_char(struct ben_encode_ctx *ctx, char c);
  * This function is used to implement encoders for user-defined types.
  */
 int ben_put_buffer(struct ben_encode_ctx *ctx, const void *buf, size_t len);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

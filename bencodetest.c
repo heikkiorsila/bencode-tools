@@ -581,10 +581,12 @@ static void decode_printed_tests(void)
 		/* list tests */
 		{.s = "[]", .l = 2},
 		{.s = "[,]", .l = 3, .e = BEN_INVALID},
+		{.s = "[", .l = 1, .e = BEN_INSUFFICIENT},
 		{.s = "[1]", .l = 3},
 		{.s = "[1,]", .l = 4},
 		{.s = "[1,2]", .l = 5},
 		{.s = "[1,2,]", .l = 6},
+		{.s = "[ 1 , 2 , ]", .l = 11},
 		{.s = "['']", .l = 4},
 		{.s = "[''] ", .l = 5},
 		{.s = " ['']", .l = 5},
@@ -627,6 +629,9 @@ static void decode_printed_tests(void)
 		/* dict tests */
 		{.s = "{}", .l = 2},
 		{.s = "{1: 2}", .l = 6},
+		{.s = "{1: 2,}", .l = 7},
+		{.s = "{1: 2, 3: 4}", .l = 12},
+		{.s = "{ 1 : 2 , }", .l = 11},
 		{.s = "{", .l = 1, .e = BEN_INSUFFICIENT},
 		{.s = "{'", .l = 2, .e = BEN_INSUFFICIENT},
 		{.s = "{'a", .l = 3, .e = BEN_INSUFFICIENT},
@@ -1098,6 +1103,115 @@ static void cmp_tests(void)
 	ben_free(b);
 }
 
+void unpack_tests(void)
+{
+	struct test {
+		char *encoded;
+		size_t len;
+		char *fmt;
+		int e;
+	};
+	/* each format string must refer to at most three strings */
+	const struct test table[] = {
+		{.encoded = "l3:fooe", .len = -1, .fmt = "[%ps, ]"},
+		{.encoded = "l3:fooe", .len = -1, .fmt = "[%d, ]", .e = BEN_MISMATCH},
+		{.encoded = "ldee", .len = -1, .fmt = "[{}]"},
+		{.encoded = "ldee", .len = -1, .fmt = "[", .e = BEN_INSUFFICIENT},
+		{.encoded = "de", .len = -1, .fmt = "{", .e = BEN_INSUFFICIENT},
+		{.encoded = "ldee", .len = -1, .fmt = "[]", .e = BEN_MISMATCH},
+		{.encoded = "d3:foo3:bare", .len = -1, .fmt = "{'foo': %ps}"},
+		{.encoded = "d3:foo3:bare", .len = -1, .fmt = "{'error': %ps}", .e = BEN_MISMATCH},
+		{.encoded = "d3:foo3:bare", .len = -1, .fmt = "{'foo': %d}", .e = BEN_MISMATCH},
+		{.encoded = "d3:foo3:bare", .len = -1, .fmt = "{ 'foo': %ps }"},
+		{.encoded = "d3:foo3:bar3:keyi123ee", .len = -1, .fmt = "{'foo': %ps}"},
+		{.encoded = "l3:foo3:bare", .len = -1, .fmt = "[%ps, %ps]"},
+		{.encoded = "l3:foo3:bare", .len = -1, .fmt = "[ %ps, %ps ] "},
+		{.encoded = "l3:food3:key3:valee", .len = -1, .fmt = "[%ps, {'key': %ps}]"},
+		{.encoded = NULL,},
+	};
+	const char *s = "d6:author5:Alice6:lengthi100000e4:name8:spam.mp3e";
+	const char *s2 = "l5:Alice8:spam.mp3e";
+
+	char *author;
+	const struct bencode *name;
+	long length;
+	size_t i;
+	char *str1;
+	char *str2;
+	char *str3;
+	struct bencode *b;
+	struct bencode_error error;
+	size_t off;
+
+	for (i = 0; table[i].encoded != NULL; i++) {
+		const char *encoded = table[i].encoded;
+		size_t len = table[i].len;
+		const char *fmt = table[i].fmt;
+		if (len == -1)
+			len = strlen(encoded);
+		b = ben_decode(encoded, len);
+		if (b == NULL) {
+			fprintf(stderr, "Failed to decode: %s\n", encoded);
+			exit(1);
+		}
+		ben_unpack2(b, &off, &error, fmt, &str1, &str2, &str3);
+		if (error.error != table[i].e) {
+			fprintf(stderr, "Unpack test failed: %s (%d != %d)\n", fmt,
+				error.error, table[i].e);
+			exit(1);
+		}
+		ben_free(b);
+	}
+
+	b = ben_decode(s, strlen(s));
+	assert(b != NULL);
+
+	assert(ben_unpack(b, "{\"author\": %ps, \"name\": %pb, \"length\": %ld}",
+			  &author, &name, &length) == 0);
+	assert(strcmp(author, "Alice") == 0);
+	assert(strcmp(ben_str_val(name), "spam.mp3") == 0);
+	assert(length == 100000);
+	ben_free(b);
+
+	b = ben_decode(s2, strlen(s2));
+	assert(b != NULL);
+	assert(ben_unpack(b, "[%ps, %pb]", &author, &name) == 0);
+	assert(strcmp(author, "Alice") == 0);
+	assert(strcmp(ben_str_val(name), "spam.mp3") == 0);
+	ben_free(b);
+}
+
+void pack_tests(void)
+{
+	struct bencode *b;
+	char *encoded;
+	size_t len;
+	const char *s = "d6:author5:Alice6:lengthi100000e4:name8:spam.mp3e";
+	const char *s2 = "l5:Alice8:spam.mp3b0e";
+	struct bencode *name = ben_str("spam.mp3");
+
+	b = ben_pack("{'author': %s, 'name': %pb, 'length': %d}",
+		     "Alice", name, 100000);
+	assert(b != NULL);
+
+	encoded = ben_encode(&len, b);
+	assert(encoded != NULL);
+	assert(len == strlen(s));
+	assert(memcmp(encoded, s, len) == 0);
+	ben_free(b);
+	free(encoded);
+
+	b = ben_pack("[%s, 'spam.mp3', False]", "Alice");
+	assert(b != NULL);
+
+	encoded = ben_encode(&len, b);
+	assert(encoded != NULL);
+	assert(len == strlen(s2));
+	assert(memcmp(encoded, s2, len) == 0);
+	ben_free(b);
+	free(encoded);
+}
+
 int main(void)
 {
 	assert(ben_decode("i0e ", 4) == NULL);
@@ -1172,6 +1286,9 @@ int main(void)
 	user_tests();
 
 	cmp_tests();
+
+	unpack_tests();
+	pack_tests();
 
 	return 0;
 }
