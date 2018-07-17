@@ -6,3 +6,6 @@ format.
 
 This was formely named 'typevalidator'. With the introduction of
 libbencodetools the project is named 'bencode-tools'.
+
+The project is hosted at https://gitlab.com/heikkiorsila/bencode-tools
+
